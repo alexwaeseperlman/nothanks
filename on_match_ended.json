@@ -1,0 +1,56 @@
+{
+   "matchId" : "match-1762019280242-089w",
+   "standings" : [
+      {
+         "botId" : "test-2v8u",
+         "cards" : [
+            5,
+            8,
+            10,
+            22,
+            24
+         ],
+         "chips" : 10,
+         "name" : "TEST",
+         "totalScore" : 59
+      },
+      {
+         "botId" : "samplepythonbot-5-tmn-xuub",
+         "cards" : [
+            6,
+            9,
+            14,
+            15,
+            18,
+            19,
+            25,
+            28,
+            30,
+            32,
+            33
+         ],
+         "chips" : 12,
+         "name" : "SamplePythonBot-5-tmn",
+         "totalScore" : 150
+      },
+      {
+         "botId" : "samplepythonbot-1-95d-2a2y",
+         "cards" : [
+            13,
+            16,
+            17,
+            23,
+            27,
+            29,
+            31,
+            34
+         ],
+         "chips" : 11,
+         "name" : "SamplePythonBot-1-95d",
+         "totalScore" : 162
+      }
+   ],
+   "winners" : [
+      "test-2v8u"
+   ]
+}
