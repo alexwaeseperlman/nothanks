@@ -2,17 +2,24 @@ const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const BotArena = require("./botArena");
+const {
+  CARDS,
+  HIDDEN_CARDS,
+  CHIPS_PER_PLAYER,
+  shuffle,
+  calculateScore,
+  computeWinnerIds,
+} = require("./gameUtils");
 
 const PORT = process.env.PORT || 3000;
-const CARDS = Array.from({ length: 33 }, (_, idx) => idx + 3);
-const HIDDEN_CARDS = 9;
-const CHIPS_PER_PLAYER = 11;
 const MAX_NAME_LENGTH = 24;
 const MAX_EVENTS = 50;
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+const botArena = new BotArena(io, app);
 
 const rooms = new Map();
 
@@ -20,6 +27,10 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/room/:roomId", (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+});
+
+app.get("/bots", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "bots.html"));
 });
 
 io.on("connection", (socket) => {
@@ -394,32 +405,6 @@ function broadcastState(roomId) {
   io.to(roomId).emit("stateUpdate", sanitizeRoom(room));
 }
 
-function computeWinnerIds(players) {
-  if (!players.length) {
-    return [];
-  }
-  const lowest = Math.min(...players.map((player) => player.score));
-  return players.filter((player) => player.score === lowest).map((player) => player.id);
-}
-
-function calculateScore(cards, chips) {
-  if (!cards.length) {
-    return -chips;
-  }
-  let total = 0;
-  let previous = null;
-  cards
-    .slice()
-    .sort((a, b) => a - b)
-    .forEach((card) => {
-      if (previous === null || card !== previous + 1) {
-        total += card;
-      }
-      previous = card;
-    });
-  return total - chips;
-}
-
 function cleanupRoomIfEmpty(roomId) {
   const room = rooms.get(roomId);
   if (!room) {
@@ -428,15 +413,6 @@ function cleanupRoomIfEmpty(roomId) {
   if (room.players.length === 0) {
     rooms.delete(roomId);
   }
-}
-
-function shuffle(list) {
-  const array = [...list];
-  for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
 }
 
 function equalsIgnoreCase(a, b) {

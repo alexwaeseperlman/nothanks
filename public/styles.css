@@ -235,6 +235,36 @@ input {
   border-radius: 6px;
 }
 
+.scroll-table {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #ececec;
+}
+
+thead th {
+  background-color: #f4f6ff;
+  font-weight: 600;
+}
+
+tfoot td {
+  font-weight: 600;
+}
+
+tbody tr:hover {
+  background-color: #f8f9ff;
+}
+
 .input-row {
   display: flex;
   gap: 0.5rem;

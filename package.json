@@ -5,13 +5,17 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "NODE_ENV=development node server/index.js"
+    "dev": "NODE_ENV=development node server/index.js",
+    "bot:example": "node bots/exampleBot.js",
+    "bot:smart": "node bots/smartBot.js",
+    "demo": "node scripts/runBotDemo.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "express": "^5.1.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   }
 }

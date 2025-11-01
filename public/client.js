@@ -79,6 +79,7 @@ function renderLanding() {
           </div>
         </form>
       </div>
+      <p><a href="/bots">View bot arena leaderboard</a></p>
     </div>
   `;
 
