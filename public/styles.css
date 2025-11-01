@@ -1,0 +1,275 @@
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #222;
+  background-color: #f5f5f5;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem 0;
+}
+
+p {
+  margin: 0 0 0.75rem 0;
+}
+
+a {
+  color: #2165f3;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+input {
+  font-size: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 12px 24px rgba(18, 18, 18, 0.05);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-line {
+  font-size: 0.9rem;
+  color: #555;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.subtle {
+  color: #888;
+}
+
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+}
+
+.alert-error {
+  background-color: #ffe5e5;
+  color: #a30d0d;
+  border: 1px solid #ffbdbd;
+}
+
+.alert-success {
+  background-color: #e6f7ef;
+  color: #1c7c41;
+  border: 1px solid #b2dfc3;
+}
+
+.focus-card .focus-values {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.focus-card .main-value {
+  font-size: clamp(3rem, 8vw, 4.5rem);
+  font-weight: 700;
+}
+
+.focus-card .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: #555;
+}
+
+.helper-text {
+  margin: 0 0 1rem 0;
+  color: #2d3a64;
+  background-color: #eef3ff;
+  border-left: 4px solid #2165f3;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  padding: 0.75rem 1.25rem;
+  border: none;
+  border-radius: 8px;
+  background-color: #f0f0f0;
+}
+
+.actions button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.primary {
+  background-color: #2165f3;
+  color: #fff;
+}
+
+.primary:hover:not(:disabled) {
+  background-color: #1a4fc1;
+}
+
+.player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.player-row {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background-color: #f7f8ff;
+}
+
+.player-row.current {
+  border: 2px solid #2165f3;
+  background-color: #eef3ff;
+}
+
+.player-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.player-name {
+  font-weight: 600;
+}
+
+.badges {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background-color: #d9ddf5;
+  color: #1f2c6d;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-active {
+  background-color: #2165f3;
+  color: #fff;
+}
+
+.badge-muted {
+  background-color: #f1d6d6;
+  color: #923030;
+}
+
+.player-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  color: #444;
+  font-size: 0.95rem;
+}
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.log li {
+  padding: 0.4rem 0.5rem;
+  background-color: #f3f3f3;
+  border-radius: 6px;
+}
+
+.input-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.input-row input {
+  flex: 1;
+}
+
+.input-row button {
+  padding: 0.6rem 1.1rem;
+  border: none;
+  border-radius: 8px;
+  background-color: #2165f3;
+  color: #fff;
+}
+
+.back-link {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  #app {
+    padding: 1.5rem 0.75rem 3rem;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .player-stats {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}
