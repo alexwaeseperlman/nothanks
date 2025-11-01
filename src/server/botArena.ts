@@ -1,10 +1,64 @@
-const {
+import { Application } from "express";
+import { Namespace, Server, Socket } from "socket.io";
+import {
   CARDS,
-  HIDDEN_CARDS,
   CHIPS_PER_PLAYER,
-  shuffle,
+  HIDDEN_CARDS,
   calculateScore,
-} = require("./gameUtils");
+  shuffle,
+} from "./gameUtils";
+
+type AckPayload =
+  | { ok: true; botId: string; rating: number; stats: BotStatsSnapshot }
+  | { ok: false; error: string };
+
+type BotStatsSnapshot = {
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  rating: number;
+  winRate: number;
+};
+
+type BotProfile = {
+  id: string;
+  name: string;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  lastSeen: number;
+};
+
+type ActiveBot = {
+  id: string;
+  name: string;
+  socket: Socket;
+  connected: boolean;
+  profile: BotProfile;
+  currentMatchId: string | null;
+};
+
+type MatchParticipant = {
+  botId: string;
+  name: string;
+};
+
+type StandingEntry = {
+  botId: string;
+  name: string;
+  totalScore: number;
+  cards: number[];
+  chips: number;
+};
+
+type MatchSummary = {
+  matchId: string;
+  standings: StandingEntry[];
+  winners: string[];
+};
 
 const DEFAULT_RATING = 1200;
 const MIN_RATING = 100;
@@ -12,32 +66,37 @@ const MATCH_SIZE = 3;
 const TURN_TIMEOUT_MS = 5000;
 const ELO_K = 32;
 
-class BotArena {
-  constructor(io, app) {
+export default class BotArena {
+  private readonly namespace: Namespace;
+
+  private readonly names = new Map<string, BotProfile>();
+
+  private readonly profilesById = new Map<string, BotProfile>();
+
+  readonly activeBots = new Map<string, ActiveBot>();
+
+  private readonly waitingQueue: string[] = [];
+
+  private readonly matches = new Map<string, BotMatch>();
+
+  private readonly matchByBotId = new Map<string, string>();
+
+  constructor(io: Server, app?: Application) {
     this.namespace = io.of("/bots");
-    this.app = app;
-
-    this.names = new Map(); // lower-case name -> profile
-    this.profilesById = new Map(); // id -> profile
-    this.activeBots = new Map(); // botId -> bot connection info
-    this.waitingQueue = [];
-    this.matches = new Map(); // matchId -> BotMatch
-    this.matchByBotId = new Map(); // botId -> matchId
-
     this.namespace.on("connection", this.handleConnection.bind(this));
 
-    if (this.app) {
-      this.app.get("/api/bots/ratings", (_req, res) => {
+    if (app) {
+      app.get("/api/bots/ratings", (_req, res) => {
         res.json(this.getLeaderboard());
       });
     }
   }
 
-  handleConnection(socket) {
-    socket.once("registerBot", (payload = {}, ack) => {
+  private handleConnection(socket: Socket): void {
+    socket.once("registerBot", (payload: { name?: string } = {}, ack?: (res: AckPayload) => void) => {
       this.registerBot(socket, payload, ack);
     });
-    socket.on("botAction", (payload = {}) => {
+    socket.on("botAction", (payload: { matchId?: string; action?: string } = {}) => {
       this.handleBotAction(socket, payload);
     });
     socket.on("enqueue", () => {
@@ -51,7 +110,7 @@ class BotArena {
     });
   }
 
-  registerBot(socket, payload, ack) {
+  private registerBot(socket: Socket, payload: { name?: string }, ack?: (res: AckPayload) => void): void {
     const name = typeof payload.name === "string" ? payload.name.trim() : "";
     if (!name) {
       this.sendAck(ack, { ok: false, error: "Bot name is required." });
@@ -90,12 +149,13 @@ class BotArena {
       this.profilesById.set(id, profile);
     }
 
-    const bot = {
+    const bot: ActiveBot = {
       id: profile.id,
       name: profile.name,
       socket,
       connected: true,
       profile,
+      currentMatchId: null,
     };
     this.activeBots.set(bot.id, bot);
     socket.data.botId = bot.id;
@@ -113,9 +173,9 @@ class BotArena {
       stats: this.buildStats(profile),
     });
 
-    const matchId = this.matchByBotId.get(bot.id);
-    if (matchId) {
-      const match = this.matches.get(matchId);
+    const existingMatchId = this.matchByBotId.get(bot.id);
+    if (existingMatchId) {
+      const match = this.matches.get(existingMatchId);
       if (match) {
         match.reconnectBot(bot);
         return;
@@ -126,7 +186,7 @@ class BotArena {
     this.enqueueBot(bot);
   }
 
-  handleBotAction(socket, payload) {
+  private handleBotAction(socket: Socket, payload: { matchId?: string; action?: string }): void {
     const bot = this.getBotBySocket(socket);
     if (!bot) {
       return;
@@ -142,26 +202,24 @@ class BotArena {
     match.receiveAction(bot.id, action);
   }
 
-  handleDisconnect(socket) {
+  private handleDisconnect(socket: Socket): void {
     const bot = this.getBotBySocket(socket);
     if (!bot) {
       return;
     }
     bot.connected = false;
-    bot.socket = null;
+    bot.socket = socket;
     this.activeBots.delete(bot.id);
 
     this.removeFromQueue(bot.id);
     const matchId = this.matchByBotId.get(bot.id);
     if (matchId) {
       const match = this.matches.get(matchId);
-      if (match) {
-        match.botDisconnected(bot.id);
-      }
+      match?.botDisconnected(bot.id);
     }
   }
 
-  enqueueBot(bot) {
+  enqueueBot(bot: ActiveBot): void {
     if (this.matchByBotId.has(bot.id)) {
       return;
     }
@@ -172,16 +230,16 @@ class BotArena {
     this.tryStartMatches();
   }
 
-  removeFromQueue(botId) {
+  private removeFromQueue(botId: string): void {
     const index = this.waitingQueue.indexOf(botId);
     if (index !== -1) {
       this.waitingQueue.splice(index, 1);
     }
   }
 
-  tryStartMatches() {
+  private tryStartMatches(): void {
     while (this.waitingQueue.length >= MATCH_SIZE) {
-      const participants = [];
+      const participants: ActiveBot[] = [];
       for (let i = 0; i < MATCH_SIZE; i += 1) {
         const pickIndex = Math.floor(Math.random() * this.waitingQueue.length);
         const botId = this.waitingQueue.splice(pickIndex, 1)[0];
@@ -203,7 +261,7 @@ class BotArena {
     }
   }
 
-  startMatch(participants) {
+  private startMatch(participants: ActiveBot[]): void {
     const match = new BotMatch(this, participants);
     this.matches.set(match.id, match);
     participants.forEach((bot) => {
@@ -212,26 +270,23 @@ class BotArena {
     match.start();
   }
 
-  finishMatch(match) {
+  finishMatch(match: BotMatch): void {
     this.matches.delete(match.id);
     match.participants.forEach((participant) => {
       this.matchByBotId.delete(participant.botId);
     });
   }
 
-  updateStatsFromMatch(matchResult) {
-    const standings = matchResult.standings;
-    const winners = matchResult.winners;
-
-    standings.forEach((entry) => {
+  updateStatsFromMatch(summary: MatchSummary): void {
+    summary.standings.forEach((entry) => {
       const profile = this.profilesById.get(entry.botId);
       if (!profile) {
         return;
       }
       profile.games += 1;
       profile.lastSeen = Date.now();
-      if (winners.includes(entry.botId)) {
-        if (winners.length > 1) {
+      if (summary.winners.includes(entry.botId)) {
+        if (summary.winners.length > 1) {
           profile.draws += 1;
         } else {
           profile.wins += 1;
@@ -241,11 +296,11 @@ class BotArena {
       }
     });
 
-    this.applyElo(standings);
+    this.applyElo(summary.standings);
   }
 
-  applyElo(standings) {
-    const deltas = new Map();
+  private applyElo(standings: StandingEntry[]): void {
+    const deltas = new Map<string, number>();
     for (let i = 0; i < standings.length; i += 1) {
       for (let j = i + 1; j < standings.length; j += 1) {
         const first = standings[i];
@@ -285,37 +340,31 @@ class BotArena {
     });
   }
 
-  getLeaderboard() {
+  getLeaderboard(): Array<BotProfile & { winRate: number }> {
     const profiles = Array.from(this.profilesById.values());
     profiles.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
     return profiles.map((profile) => ({
-      id: profile.id,
-      name: profile.name,
+      ...profile,
       rating: Math.round(profile.rating),
-      games: profile.games,
-      wins: profile.wins,
-      losses: profile.losses,
-      draws: profile.draws,
       winRate: profile.games ? profile.wins / profile.games : 0,
-      lastSeen: profile.lastSeen,
     }));
   }
 
-  getBotBySocket(socket) {
-    const botId = socket.data?.botId;
+  private getBotBySocket(socket: Socket): ActiveBot | null {
+    const botId = socket.data?.botId as string | undefined;
     if (!botId) {
       return null;
     }
-    return this.activeBots.get(botId) || null;
+    return this.activeBots.get(botId) ?? null;
   }
 
-  sendAck(ack, payload) {
+  private sendAck(ack: ((res: AckPayload) => void) | undefined, payload: AckPayload): void {
     if (typeof ack === "function") {
       ack(payload);
     }
   }
 
-  buildStats(profile) {
+  private buildStats(profile: BotProfile): BotStatsSnapshot {
     return {
       games: profile.games,
       wins: profile.wins,
@@ -326,12 +375,13 @@ class BotArena {
     };
   }
 
-  generateBotId(name) {
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 32) || "bot";
+  private generateBotId(name: string): string {
+    const slug =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 32) || "bot";
     let suffix = Math.random().toString(36).slice(2, 6);
     let candidate = `${slug}-${suffix}`;
     while (this.profilesById.has(candidate)) {
@@ -343,31 +393,48 @@ class BotArena {
 }
 
 class BotMatch {
-  constructor(arena, participants) {
-    this.arena = arena;
-    this.participants = participants.map((bot) => ({
+  readonly id: string;
+
+  readonly participants: MatchParticipant[];
+
+  private deck: number[] = [];
+
+  private removedCards: number[] = [];
+
+  private currentCard: number | null = null;
+
+  private pot = 0;
+
+  private turnIndex = 0;
+
+  private players: Array<{
+    botId: string;
+    name: string;
+    chips: number;
+    cards: number[];
+    connected: boolean;
+  }> = [];
+
+  private turnTimer: NodeJS.Timeout | null = null;
+
+  private history: Array<{ timestamp: number; message: string }> = [];
+
+  constructor(
+    private readonly arena: BotArena,
+    participantBots: ActiveBot[],
+  ) {
+    this.participants = participantBots.map((bot) => ({
       botId: bot.id,
       name: bot.name,
     }));
     this.id = `match-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    this.deck = [];
-    this.removedCards = [];
-    this.currentCard = null;
-    this.pot = 0;
-    this.turnIndex = 0;
-    this.players = [];
-    this.turnTimer = null;
-    this.history = [];
 
-    this.participants.forEach((participant) => {
-      const bot = this.arena.activeBots.get(participant.botId);
-      if (bot) {
-        bot.currentMatchId = this.id;
-      }
+    participantBots.forEach((bot) => {
+      bot.currentMatchId = this.id;
     });
   }
 
-  start() {
+  start(): void {
     this.deck = shuffle([...CARDS]);
     this.removedCards = this.deck.splice(0, HIDDEN_CARDS);
     this.currentCard = this.deck.shift() ?? null;
@@ -389,7 +456,7 @@ class BotMatch {
     }
   }
 
-  reconnectBot(bot) {
+  reconnectBot(bot: ActiveBot): void {
     const participant = this.participants.find((entry) => entry.botId === bot.id);
     if (!participant) {
       return;
@@ -399,11 +466,11 @@ class BotMatch {
       state: this.buildBotView(bot.id),
     });
     if (this.players[this.turnIndex]?.botId === bot.id) {
-      this.promptPlayer(); // ensure they get latest timer
+      this.promptPlayer();
     }
   }
 
-  receiveAction(botId, action) {
+  receiveAction(botId: string, action?: string): void {
     const current = this.players[this.turnIndex];
     if (!current || current.botId !== botId) {
       return;
@@ -427,7 +494,7 @@ class BotMatch {
     }
   }
 
-  botDisconnected(botId) {
+  botDisconnected(botId: string): void {
     const player = this.players.find((entry) => entry.botId === botId);
     if (player) {
       player.connected = false;
@@ -437,7 +504,7 @@ class BotMatch {
     }
   }
 
-  applyPass(player) {
+  private applyPass(player: { chips: number; name: string }): void {
     if (player.chips > 0) {
       player.chips -= 1;
       this.pot += 1;
@@ -447,7 +514,7 @@ class BotMatch {
     }
   }
 
-  applyTake(player) {
+  private applyTake(player: { cards: number[]; name: string; chips: number }): void {
     if (this.currentCard === null) {
       return;
     }
@@ -455,12 +522,16 @@ class BotMatch {
     if (this.pot > 0) {
       player.chips += this.pot;
     }
-    this.log(`${player.name} took ${this.currentCard}${this.pot ? ` and ${this.pot} chips` : ""}.`);
+    this.log(
+      `${player.name} took ${this.currentCard}${
+        this.pot ? ` and ${this.pot} chips` : ""
+      }.`,
+    );
     this.pot = 0;
     this.currentCard = this.deck.shift() ?? null;
   }
 
-  advanceTurn() {
+  private advanceTurn(): void {
     if (this.players.length === 0) {
       return;
     }
@@ -478,7 +549,7 @@ class BotMatch {
     this.promptPlayer();
   }
 
-  advanceAfterTake(player) {
+  private advanceAfterTake(player: { botId: string; connected: boolean }) {
     this.broadcast("matchUpdate", this.buildPublicState());
     if (this.currentCard === null) {
       this.finish();
@@ -492,7 +563,7 @@ class BotMatch {
     }
   }
 
-  promptPlayer() {
+  private promptPlayer(): void {
     if (this.turnTimer) {
       clearTimeout(this.turnTimer);
     }
@@ -512,21 +583,21 @@ class BotMatch {
     }, TURN_TIMEOUT_MS);
   }
 
-  pickFallbackAction(player) {
+  private pickFallbackAction(player: { chips: number }): string {
     if (player.chips <= 0) {
       return "take";
     }
     return Math.random() < 0.5 ? "pass" : "take";
   }
 
-  buildBotView(botId) {
+  private buildBotView(botId: string) {
     const player = this.players.find((entry) => entry.botId === botId);
     return {
       matchId: this.id,
       you: {
-        name: player?.name || "",
+        name: player?.name ?? "",
         chips: player?.chips ?? 0,
-        cards: (player?.cards || []).slice().sort((a, b) => a - b),
+        cards: (player?.cards ?? []).slice().sort((a, b) => a - b),
       },
       currentCard: this.currentCard,
       pot: this.pot,
@@ -544,7 +615,7 @@ class BotMatch {
     };
   }
 
-  buildPublicState() {
+  private buildPublicState() {
     return {
       matchId: this.id,
       currentCard: this.currentCard,
@@ -563,12 +634,12 @@ class BotMatch {
     };
   }
 
-  finish() {
+  private finish(): void {
     if (this.turnTimer) {
       clearTimeout(this.turnTimer);
       this.turnTimer = null;
     }
-    const standings = this.players.map((entry) => ({
+    const standings: StandingEntry[] = this.players.map((entry) => ({
       botId: entry.botId,
       name: entry.name,
       totalScore: calculateScore(entry.cards, entry.chips),
@@ -577,7 +648,9 @@ class BotMatch {
     }));
     standings.sort((a, b) => a.totalScore - b.totalScore);
     const bestScore = standings[0]?.totalScore ?? 0;
-    const winners = standings.filter((entry) => entry.totalScore === bestScore).map((entry) => entry.botId);
+    const winners = standings
+      .filter((entry) => entry.totalScore === bestScore)
+      .map((entry) => entry.botId);
 
     this.broadcast("matchEnded", {
       matchId: this.id,
@@ -592,7 +665,11 @@ class BotMatch {
       }
     });
 
-    this.arena.updateStatsFromMatch({ standings, winners });
+    this.arena.updateStatsFromMatch({
+      matchId: this.id,
+      standings,
+      winners,
+    });
     this.arena.finishMatch(this);
 
     standings.forEach((entry) => {
@@ -603,13 +680,13 @@ class BotMatch {
     });
   }
 
-  broadcast(event, payload) {
+  private broadcast(event: string, payload: unknown): void {
     this.participants.forEach((participant) => {
       this.sendToBot(participant.botId, event, payload);
     });
   }
 
-  sendToBot(botId, event, payload) {
+  private sendToBot(botId: string, event: string, payload: unknown): void {
     const bot = this.arena.activeBots.get(botId);
     if (!bot || !bot.connected || !bot.socket) {
       return;
@@ -617,7 +694,7 @@ class BotMatch {
     bot.socket.emit(event, payload);
   }
 
-  log(message) {
+  private log(message: string): void {
     this.history.push({
       timestamp: Date.now(),
       message,
@@ -627,5 +704,3 @@ class BotMatch {
     }
   }
 }
-
-module.exports = BotArena;

@@ -1,101 +1,164 @@
-const path = require("path");
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const BotArena = require("./botArena");
-const {
+import path from "path";
+import express, { Request, Response } from "express";
+import http from "http";
+import { Server, Socket } from "socket.io";
+import BotArena from "./botArena";
+import {
   CARDS,
   HIDDEN_CARDS,
   CHIPS_PER_PLAYER,
-  shuffle,
   calculateScore,
   computeWinnerIds,
-} = require("./gameUtils");
+  shuffle,
+} from "./gameUtils";
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const MAX_NAME_LENGTH = 24;
 const MAX_EVENTS = 50;
+
+type Player = {
+  id: string;
+  name: string;
+  chips: number;
+  cards: number[];
+  connected: boolean;
+  socketId: string | null;
+};
+
+type RoomState = "lobby" | "inProgress" | "finished";
+
+type RoomEvent = {
+  timestamp: number;
+  message: string;
+};
+
+type Room = {
+  id: string;
+  state: RoomState;
+  players: Player[];
+  hostId: string | null;
+  deck: number[];
+  removedCards: number[];
+  currentCard: number | null;
+  pot: number;
+  turnIndex: number;
+  events: RoomEvent[];
+};
+
+type SanitizedPlayer = {
+  id: string;
+  name: string;
+  chips: number;
+  cards: number[];
+  score: number;
+  connected: boolean;
+  isHost: boolean;
+  isTurn: boolean;
+};
+
+type SanitizedRoom = {
+  roomId: string;
+  state: RoomState;
+  players: SanitizedPlayer[];
+  pot: number;
+  currentCard: number | null;
+  deckCount: number;
+  removedCount: number;
+  hostId: string | null;
+  winnerIds: string[];
+  events: RoomEvent[];
+};
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const botArena = new BotArena(io, app);
 
-const rooms = new Map();
+const rooms = new Map<string, Room>();
 
-app.use(express.static(path.join(__dirname, "..", "public")));
+const ROOT_DIR = path.resolve(__dirname, "..", "..");
 
-app.get("/room/:roomId", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+app.use(express.static(path.join(ROOT_DIR, "public")));
+
+app.get("/room/:roomId", (_req: Request, res: Response) => {
+  res.sendFile(path.join(ROOT_DIR, "public", "index.html"));
 });
 
-app.get("/bots", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "bots.html"));
+app.get("/bots", (_req: Request, res: Response) => {
+  res.sendFile(path.join(ROOT_DIR, "public", "bots.html"));
 });
 
-io.on("connection", (socket) => {
-  socket.on("joinRoom", (payload = {}, ack) => {
-    const { roomId, name, playerId } = payload;
-    if (!roomId || typeof roomId !== "string") {
-      emitError(socket, "Room id required.");
-      return;
-    }
-    const trimmedName = `${name || ""}`.trim().slice(0, MAX_NAME_LENGTH) || "Player";
-
-    const room = getOrCreateRoom(roomId);
-
-    const existingByName = room.players.find((p) =>
-      equalsIgnoreCase(p.name, trimmedName),
-    );
-    if (existingByName && existingByName.connected && existingByName.socketId !== socket.id) {
-      emitError(socket, "That name is already seated. Try a different one.");
-      return;
-    }
-
-    let player = existingByName || null;
-    if (player) {
-      player.name = trimmedName;
-      player.connected = true;
-      player.socketId = socket.id;
-      addEvent(room, `${player.name} rejoined.`);
-    } else {
-      const id = generatePlayerId(room, trimmedName);
-      player = {
-        id,
-        name: trimmedName,
-        chips: 0,
-        cards: [],
-        connected: true,
-        socketId: socket.id,
-      };
-      room.players.push(player);
-      addEvent(room, `${player.name} joined the lobby.`);
-    }
-
-    if (!room.hostId || !room.players.some((p) => p.id === room.hostId)) {
-      room.hostId = room.players[0]?.id || null;
-    }
-
-    socket.join(roomId);
-    socket.data.roomId = roomId;
-    socket.data.playerId = player.id;
-
-    if (room.state !== "inProgress") {
-      player.chips = CHIPS_PER_PLAYER;
-      player.cards = [];
-    } else if (room.turnIndex === -1) {
-      const nextIndex = room.players.findIndex((entry) => entry.connected);
-      if (nextIndex !== -1) {
-        room.turnIndex = nextIndex;
+io.on("connection", (socket: Socket) => {
+  socket.on(
+    "joinRoom",
+    (payload: { roomId?: string; name?: string; playerId?: string } = {}, ack?: (response: unknown) => void) => {
+      const { roomId, name } = payload;
+      if (!roomId || typeof roomId !== "string") {
+        emitError(socket, "Room id required.");
+        return;
       }
-    }
+      const trimmedName =
+        `${name || ""}`.trim().slice(0, MAX_NAME_LENGTH) || "Player";
 
-    const state = sanitizeRoom(room);
-    if (typeof ack === "function") {
-      ack({ ok: true, playerId: player.id, roomId, state });
-    }
-    broadcastState(roomId);
-  });
+      const room = getOrCreateRoom(roomId);
+
+      const existingByName = room.players.find((p) =>
+        equalsIgnoreCase(p.name, trimmedName),
+      );
+      if (
+        existingByName &&
+        existingByName.connected &&
+        existingByName.socketId !== socket.id
+      ) {
+        emitError(socket, "That name is already seated. Try a different one.");
+        return;
+      }
+
+      let player: Player;
+      if (existingByName) {
+        player = existingByName;
+        player.name = trimmedName;
+        player.connected = true;
+        player.socketId = socket.id;
+        addEvent(room, `${player.name} rejoined.`);
+      } else {
+        const id = generatePlayerId(room, trimmedName);
+        player = {
+          id,
+          name: trimmedName,
+          chips: 0,
+          cards: [],
+          connected: true,
+          socketId: socket.id,
+        };
+        room.players.push(player);
+        addEvent(room, `${player.name} joined the lobby.`);
+      }
+
+      if (!room.hostId || !room.players.some((p) => p.id === room.hostId)) {
+        room.hostId = room.players[0]?.id ?? null;
+      }
+
+      socket.join(roomId);
+      socket.data.roomId = roomId;
+      socket.data.playerId = player.id;
+
+      if (room.state !== "inProgress") {
+        player.chips = CHIPS_PER_PLAYER;
+        player.cards = [];
+      } else if (room.turnIndex === -1) {
+        const nextIndex = room.players.findIndex((entry) => entry.connected);
+        if (nextIndex !== -1) {
+          room.turnIndex = nextIndex;
+        }
+      }
+
+      const state = sanitizeRoom(room);
+      ack?.({ ok: true, playerId: player.id, roomId, state });
+      broadcastState(roomId);
+    },
+  );
 
   socket.on("startGame", () => {
     const room = getRoomForSocket(socket);
@@ -114,7 +177,8 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const player = findPlayer(room, socket.data.playerId);
+    const playerId = socket.data.playerId as string | undefined;
+    const player = playerId ? findPlayer(room, playerId) : null;
     if (!player || room.hostId !== player.id) {
       emitError(socket, "Only the host can start the game.");
       return;
@@ -124,7 +188,7 @@ io.on("connection", (socket) => {
     broadcastState(room.id);
   });
 
-  socket.on("playerAction", (payload = {}) => {
+  socket.on("playerAction", (payload: { action?: string } = {}) => {
     const { action } = payload;
     const room = getRoomForSocket(socket);
     if (!room) {
@@ -137,7 +201,8 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const playerIndex = room.players.findIndex((p) => p.id === socket.data.playerId);
+    const playerId = socket.data.playerId as string | undefined;
+    const playerIndex = room.players.findIndex((p) => p.id === playerId);
     if (playerIndex === -1) {
       emitError(socket, "Player not found in this room.");
       return;
@@ -179,7 +244,8 @@ io.on("connection", (socket) => {
     if (!room) {
       return;
     }
-    const playerIndex = room.players.findIndex((p) => p.id === socket.data.playerId);
+    const playerId = socket.data.playerId as string | undefined;
+    const playerIndex = room.players.findIndex((p) => p.id === playerId);
     if (playerIndex === -1) {
       cleanupRoomIfEmpty(room.id);
       return;
@@ -193,7 +259,7 @@ io.on("connection", (socket) => {
       room.players.splice(playerIndex, 1);
       addEvent(room, `${player.name} left the lobby.`);
       if (room.hostId === player.id) {
-        room.hostId = room.players[0]?.id || null;
+        room.hostId = room.players[0]?.id ?? null;
       }
     } else {
       addEvent(room, `${player.name} disconnected.`);
@@ -212,11 +278,11 @@ server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
 
-function emitError(socket, message) {
+function emitError(socket: Socket, message: string): void {
   socket.emit("errorMessage", message);
 }
 
-function getOrCreateRoom(roomId) {
+function getOrCreateRoom(roomId: string): Room {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
       id: roomId,
@@ -231,22 +297,22 @@ function getOrCreateRoom(roomId) {
       events: [],
     });
   }
-  return rooms.get(roomId);
+  return rooms.get(roomId) as Room;
 }
 
-function getRoomForSocket(socket) {
-  const roomId = socket.data.roomId;
+function getRoomForSocket(socket: Socket): Room | null {
+  const roomId = socket.data.roomId as string | undefined;
   if (!roomId) {
     return null;
   }
-  return rooms.get(roomId) || null;
+  return rooms.get(roomId) ?? null;
 }
 
-function findPlayer(room, playerId) {
-  return room.players.find((p) => p.id === playerId) || null;
+function findPlayer(room: Room, playerId: string): Player | null {
+  return room.players.find((p) => p.id === playerId) ?? null;
 }
 
-function startGame(room, initiatorId) {
+function startGame(room: Room, initiatorId: string): void {
   room.deck = shuffle([...CARDS]);
   room.removedCards = room.deck.splice(0, HIDDEN_CARDS);
   room.currentCard = null;
@@ -269,8 +335,8 @@ function startGame(room, initiatorId) {
   addEvent(room, "Game started.");
 }
 
-function handlePass(room, player) {
-  if (!room.currentCard && room.currentCard !== 0) {
+function handlePass(room: Room, player: Player): string | null {
+  if (room.currentCard == null) {
     return "No card to pass on.";
   }
   if (player.chips <= 0) {
@@ -284,8 +350,8 @@ function handlePass(room, player) {
   return null;
 }
 
-function handleTake(room, player) {
-  if (!room.currentCard && room.currentCard !== 0) {
+function handleTake(room: Room, player: Player): string | null {
+  if (room.currentCard == null) {
     return "No card to take.";
   }
 
@@ -308,15 +374,15 @@ function handleTake(room, player) {
   return null;
 }
 
-function drawNextCard(room) {
-  if (!room.deck.length) {
+function drawNextCard(room: Room): void {
+  if (room.deck.length === 0) {
     finishGame(room);
     return;
   }
-  room.currentCard = room.deck.shift();
+  room.currentCard = room.deck.shift() ?? null;
 }
 
-function advanceTurn(room) {
+function advanceTurn(room: Room): void {
   if (room.players.length === 0) {
     room.turnIndex = -1;
     return;
@@ -333,7 +399,7 @@ function advanceTurn(room) {
   room.turnIndex = -1;
 }
 
-function finishGame(room) {
+function finishGame(room: Room): void {
   if (room.state === "finished") {
     return;
   }
@@ -348,12 +414,12 @@ function finishGame(room) {
   const bestScore = Math.min(...scores.map((entry) => entry.score));
   const winners = scores.filter((entry) => entry.score === bestScore);
   const winnerNames = winners
-    .map((entry) => findPlayer(room, entry.id)?.name || "Player")
+    .map((entry) => findPlayer(room, entry.id)?.name ?? "Player")
     .join(", ");
   addEvent(room, `Game finished. Winner: ${winnerNames} (${bestScore}).`);
 }
 
-function addEvent(room, message) {
+function addEvent(room: Room, message: string): void {
   room.events.push({
     timestamp: Date.now(),
     message,
@@ -363,7 +429,7 @@ function addEvent(room, message) {
   }
 }
 
-function sanitizeRoom(room) {
+function sanitizeRoom(room: Room): SanitizedRoom {
   const players = room.players.map((player, index) => {
     const cards = [...player.cards].sort((a, b) => a - b);
     return {
@@ -379,9 +445,7 @@ function sanitizeRoom(room) {
   });
 
   const winnerIds =
-    room.state === "finished"
-      ? computeWinnerIds(players)
-      : [];
+    room.state === "finished" ? computeWinnerIds(players) : [];
 
   return {
     roomId: room.id,
@@ -397,7 +461,7 @@ function sanitizeRoom(room) {
   };
 }
 
-function broadcastState(roomId) {
+function broadcastState(roomId: string): void {
   const room = rooms.get(roomId);
   if (!room) {
     return;
@@ -405,7 +469,7 @@ function broadcastState(roomId) {
   io.to(roomId).emit("stateUpdate", sanitizeRoom(room));
 }
 
-function cleanupRoomIfEmpty(roomId) {
+function cleanupRoomIfEmpty(roomId: string): void {
   const room = rooms.get(roomId);
   if (!room) {
     return;
@@ -415,18 +479,16 @@ function cleanupRoomIfEmpty(roomId) {
   }
 }
 
-function equalsIgnoreCase(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") {
-    return false;
-  }
+function equalsIgnoreCase(a: string, b: string): boolean {
   return a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
 }
 
-function generatePlayerId(room, name) {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "player";
+function generatePlayerId(room: Room, name: string): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "player";
 
   let attempt = 0;
   while (attempt < 5) {

@@ -1,14 +1,19 @@
 /* eslint-disable no-console */
-const path = require("path");
-const { spawn } = require("child_process");
+import path from "path";
+import { spawn } from "child_process";
 
 const PORT = Number.parseInt(process.env.DEMO_PORT || "4100", 10);
 const BOT_COUNT = Number.parseInt(process.env.DEMO_BOT_COUNT || "3", 10);
 const DEMO_DURATION_MS = Number.parseInt(process.env.DEMO_DURATION_MS || "8000", 10);
+const BOT_SCRIPT = process.env.DEMO_BOT_SCRIPT || "dist/bots/smartBot.js";
 
-const rootDir = path.join(__dirname, "..");
+const rootDir = path.join(__dirname, "..", "..");
 
-function spawnProcess(command, args, options = {}) {
+type SpawnOptions = {
+  env?: NodeJS.ProcessEnv;
+};
+
+function spawnProcess(command: string, args: string[], options: SpawnOptions = {}) {
   const child = spawn(command, args, {
     cwd: rootDir,
     env: { ...process.env, ...options.env },
@@ -20,17 +25,16 @@ function spawnProcess(command, args, options = {}) {
   return child;
 }
 
-async function runDemo() {
+async function runDemo(): Promise<void> {
   console.log(`[demo] Starting server on port ${PORT}`);
-  const server = spawnProcess("node", ["server/index.js"], {
+  const server = spawnProcess("node", ["dist/server/index.js"], {
     env: { PORT: String(PORT) },
   });
 
   await waitFor(2000);
 
-  const botScript = process.env.DEMO_BOT_SCRIPT || "bots/smartBot.js";
-  console.log(`[demo] Launching ${BOT_COUNT} bots via ${botScript}`);
-  const bots = spawnProcess("node", [botScript], {
+  console.log(`[demo] Launching ${BOT_COUNT} bots via ${BOT_SCRIPT}`);
+  const bots = spawnProcess("node", [BOT_SCRIPT], {
     env: {
       BOT_SERVER_URL: `http://localhost:${PORT}`,
       BOT_COUNT: String(BOT_COUNT),
@@ -48,8 +52,10 @@ async function runDemo() {
   console.log("[demo] Done");
 }
 
-function waitFor(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function waitFor(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 runDemo().catch((error) => {

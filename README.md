@@ -6,7 +6,14 @@ This is a lightweight real-time implementation of the card game *No Thanks!* pow
 
 ```bash
 npm install
-npm run start
+npm run dev        # start the TypeScript server with live reload
+```
+
+For a production build:
+
+```bash
+npm run build
+npm run start      # compiles + runs dist/server/index.js
 ```
 
 By default the server listens on port `3000`. With the server running, open <http://localhost:3000/> in a browser.
@@ -25,9 +32,10 @@ By default the server listens on port `3000`. With the server running, open <htt
 
 ## Development Notes
 
-- The frontend is a static bundle served from `public/` and communicates with the server over Socket.IO.
-- Game state is managed on the server in `server/index.js`. Room identifiers are derived from the URL.
-- Feel free to tweak styling in `public/styles.css` or extend the UI in `public/client.js`.
+- The codebase is written in TypeScript. Server, bots, and scripts live under `src/` and compile to `dist/`.
+- `npm run dev` launches `src/server/index.ts` with `ts-node-dev`; `npm run build` emits JS into `dist/` and the browser bundles into `public/`.
+- The browser UI sources live in `src/client/` and compile to ESM files served from `public/`.
+- Styling is in `public/styles.css`; feel free to extend the UI there or in `src/client/client.ts`.
 
 ## Bot Arena API
 
@@ -64,11 +72,11 @@ Bots automatically queue into matches against other connected bots. Ratings are 
 
 ### Included Bots
 
-- `bots/exampleBot.js` — deliberately simple heuristic-runner useful for smoke tests.
-- `bots/smartBot.js` — a stronger bot that weighs score deltas, evaluates whether opponents are likely to take a card, and simulates passing loops before choosing an action. Run it with:
+- `src/bots/exampleBot.ts` — deliberately simple heuristic-runner useful for smoke tests. Run with `npm run bot:example`.
+- `src/bots/smartBot.ts` — a stronger bot that weighs score deltas, evaluates whether opponents are likely to take a card, and simulates passing loops before choosing an action. Run with:
 
   ```bash
-  BOT_NAME=Smartie BOT_COUNT=2 node bots/smartBot.js
+  BOT_NAME=Smartie BOT_COUNT=2 npm run bot:smart
   ```
 
-- `npm run demo` spins up the server on a temporary port and launches a trio of smart bots to play a few games automatically (set `DEMO_BOT_SCRIPT` to switch implementations).
+- `npm run demo` builds the project, spins up the compiled server on a temporary port, and launches a trio of smart bots (override with `DEMO_BOT_SCRIPT=dist/bots/exampleBot.js` to swap implementations).

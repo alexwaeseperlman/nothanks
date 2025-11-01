@@ -1,34 +1,33 @@
+"use strict";
 const container = document.getElementById("bot-app");
-
 renderLoading();
 fetchAndRender();
 const REFRESH_INTERVAL = 5000;
 let refreshTimer = window.setInterval(fetchAndRender, REFRESH_INTERVAL);
-
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    window.clearInterval(refreshTimer);
-  } else {
-    fetchAndRender();
-    refreshTimer = window.setInterval(fetchAndRender, REFRESH_INTERVAL);
-  }
-});
-
-async function fetchAndRender() {
-  try {
-    const response = await fetch("/api/bots/ratings", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    if (document.hidden) {
+        window.clearInterval(refreshTimer);
     }
-    const data = await response.json();
-    renderLeaderboard(data);
-  } catch (error) {
-    renderError(error);
-  }
+    else {
+        fetchAndRender();
+        refreshTimer = window.setInterval(fetchAndRender, REFRESH_INTERVAL);
+    }
+});
+async function fetchAndRender() {
+    try {
+        const response = await fetch("/api/bots/ratings", { cache: "no-store" });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = (await response.json());
+        renderLeaderboard(data);
+    }
+    catch (error) {
+        renderError(error instanceof Error ? error : new Error("Unknown error"));
+    }
 }
-
 function renderLoading() {
-  container.innerHTML = `
+    container.innerHTML = `
     <div class="view">
       <h1>Bot Arena Leaderboard</h1>
       <div class="card">
@@ -38,9 +37,8 @@ function renderLoading() {
     </div>
   `;
 }
-
 function renderError(error) {
-  container.innerHTML = `
+    container.innerHTML = `
     <div class="view">
       <h1>Bot Arena Leaderboard</h1>
       <div class="card">
@@ -50,17 +48,16 @@ function renderError(error) {
       <p><a href="/">Back to game</a></p>
     </div>
   `;
-  document.getElementById("retry-btn")?.addEventListener("click", () => {
-    renderLoading();
-    fetchAndRender();
-  });
+    document.getElementById("retry-btn")?.addEventListener("click", () => {
+        renderLoading();
+        fetchAndRender();
+    });
 }
-
 function renderLeaderboard(bots) {
-  const rows = bots
-    .map((bot, index) => {
-      const winRate = bot.games ? `${Math.round(bot.winRate * 100)}%` : "—";
-      return `
+    const rows = bots
+        .map((bot, index) => {
+        const winRate = bot.games ? `${Math.round(bot.winRate * 100)}%` : "—";
+        return `
         <tr>
           <td>${index + 1}</td>
           <td>${escapeHtml(bot.name)}</td>
@@ -74,9 +71,8 @@ function renderLeaderboard(bots) {
         </tr>
       `;
     })
-    .join("");
-
-  container.innerHTML = `
+        .join("");
+    container.innerHTML = `
     <div class="view">
       <h1>Bot Arena Leaderboard</h1>
       <div class="card">
@@ -106,46 +102,44 @@ function renderLeaderboard(bots) {
     </div>
   `;
 }
-
 function escapeHtml(str) {
-  return `${str}`.replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#039;";
-      default:
-        return ch;
-    }
-  });
+    return `${str}`.replace(/[&<>"']/g, (ch) => {
+        switch (ch) {
+            case "&":
+                return "&amp;";
+            case "<":
+                return "&lt;";
+            case ">":
+                return "&gt;";
+            case '"':
+                return "&quot;";
+            case "'":
+                return "&#039;";
+            default:
+                return ch;
+        }
+    });
 }
-
 function formatRelativeTime(timestamp) {
-  if (!timestamp) {
-    return "—";
-  }
-  const delta = Date.now() - timestamp;
-  if (delta < 0) {
-    return "just now";
-  }
-  const seconds = Math.floor(delta / 1000);
-  if (seconds < 60) {
-    return "just now";
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes} min ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours} hr${hours === 1 ? "" : "s"} ago`;
-  }
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+    if (!timestamp) {
+        return "—";
+    }
+    const delta = Date.now() - timestamp;
+    if (delta < 0) {
+        return "just now";
+    }
+    const seconds = Math.floor(delta / 1000);
+    if (seconds < 60) {
+        return "just now";
+    }
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+        return `${minutes} min ago`;
+    }
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+        return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+    }
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
 }

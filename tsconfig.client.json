@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "public",
+    "rootDir": "src/client",
+    "module": "ES2020",
+    "target": "ES2020",
+    "lib": ["DOM", "ES2020"],
+    "noEmitOnError": true,
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "moduleResolution": "Node",
+    "resolveJsonModule": false,
+    "declaration": false,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/client/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

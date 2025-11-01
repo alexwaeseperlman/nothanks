@@ -1,18 +1,34 @@
 /* eslint-disable no-console */
-const { io } = require("socket.io-client");
+import { io, Socket } from "socket.io-client";
+
+type TurnState = {
+  matchId: string;
+  currentCard: number | null;
+  pot: number;
+  you: {
+    chips: number;
+    cards: number[];
+  };
+};
 
 const SERVER_URL = process.env.BOT_SERVER_URL || "http://localhost:3000";
 const BOT_COUNT = Number.parseInt(process.env.BOT_COUNT || "3", 10);
 const BASE_NAME = process.env.BOT_NAME || "SampleBot";
 
-const bots = [];
+interface SampleBot {
+  name: string;
+  socket: Socket;
+  matchId: string | null;
+}
+
+const bots: SampleBot[] = [];
 
 for (let i = 0; i < BOT_COUNT; i += 1) {
   const name = `${BASE_NAME}-${i + 1}-${Math.random().toString(36).slice(2, 5)}`;
   bots.push(spawnBot(name));
 }
 
-function spawnBot(name) {
+function spawnBot(name: string): SampleBot {
   const socket = io(`${SERVER_URL}/bots`, {
     transports: ["websocket", "polling"],
     reconnection: true,
@@ -20,7 +36,7 @@ function spawnBot(name) {
     reconnectionDelayMax: 4000,
   });
 
-  const bot = {
+  const bot: SampleBot = {
     name,
     socket,
     matchId: null,
@@ -28,7 +44,7 @@ function spawnBot(name) {
 
   socket.on("connect", () => {
     console.log(`[${name}] connected, registering…`);
-    socket.emit("registerBot", { name }, (ack) => {
+    socket.emit("registerBot", { name }, (ack?: { ok?: boolean; error?: string; rating?: number }) => {
       if (!ack?.ok) {
         console.error(`[${name}] registration failed: ${ack?.error || "unknown error"}`);
         return;
@@ -38,18 +54,20 @@ function spawnBot(name) {
     });
   });
 
-  socket.on("registered", (payload) => {
+  socket.on("registered", (payload: { stats?: unknown }) => {
     if (payload?.stats) {
       console.log(`[${name}] stats`, payload.stats);
     }
   });
 
-  socket.on("matchStarted", (state) => {
-    bot.matchId = state?.matchId || null;
-    console.log(`[${name}] match started against ${state.players.map((p) => p.name).join(", ")}`);
+  socket.on("matchStarted", (state: { matchId?: string; players: Array<{ name: string }> }) => {
+    bot.matchId = state.matchId ?? null;
+    console.log(
+      `[${name}] match started against ${state.players.map((player) => player.name).join(", ")}`,
+    );
   });
 
-  socket.on("turn", (state) => {
+  socket.on("turn", (state: TurnState) => {
     if (!state) {
       return;
     }
@@ -61,22 +79,26 @@ function spawnBot(name) {
     socket.emit("botAction", { matchId: state.matchId, action: decision });
   });
 
-  socket.on("matchUpdate", (state) => {
+  socket.on("matchUpdate", (state: { matchId?: string }) => {
     if (!state) {
       return;
     }
-    bot.matchId = state.matchId;
+    bot.matchId = state.matchId ?? null;
   });
 
-  socket.on("matchEnded", (summary) => {
+  socket.on("matchEnded", (summary: {
+    standings: Array<{ name: string; totalScore?: number; botId: string }>;
+    winners: string[];
+  }) => {
     if (!summary) {
       return;
     }
-    const placement = summary.standings.findIndex((entry) => entry.name === name) + 1;
+    const placement =
+      summary.standings.findIndex((entry) => entry.name === name) + 1;
     const score =
       summary.standings.find((entry) => entry.name === name)?.totalScore ?? "n/a";
     const win = summary.winners.includes(
-      summary.standings.find((entry) => entry.name === name)?.botId,
+      summary.standings.find((entry) => entry.name === name)?.botId ?? "",
     );
     console.log(
       `[${name}] match ended — place ${placement}/${summary.standings.length} (score ${score})${
@@ -86,29 +108,28 @@ function spawnBot(name) {
     bot.matchId = null;
   });
 
-  socket.on("disconnect", (reason) => {
+  socket.on("disconnect", (reason: string) => {
     console.log(`[${name}] disconnected: ${reason}`);
   });
 
-  socket.on("error", (error) => {
+  socket.on("error", (error: unknown) => {
     console.error(`[${name}] socket error:`, error);
   });
 
   return bot;
 }
 
-function chooseAction(state) {
+function chooseAction(state: TurnState): "pass" | "take" {
   if (!state || state.currentCard == null) {
     return "take";
   }
-  const { you, currentCard, pot } = state;
 
-  if ((you?.chips ?? 0) <= 0) {
+  if (state.you.chips <= 0) {
     return "take";
   }
 
-  const minCard = Math.min(...(you.cards.length ? you.cards : [Infinity]));
-  const potentialScore = currentCard - pot;
+  const minCard = Math.min(...(state.you.cards.length ? state.you.cards : [Infinity]));
+  const potentialScore = state.currentCard - state.pot;
   if (potentialScore <= minCard) {
     return "take";
   }
@@ -121,7 +142,7 @@ process.on("SIGINT", () => {
   bots.forEach((bot) => {
     try {
       bot.socket.disconnect();
-    } catch (error) {
+    } catch {
       // ignore
     }
   });
