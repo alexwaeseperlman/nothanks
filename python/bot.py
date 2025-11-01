@@ -9,7 +9,7 @@ class PlayerState:
     def __init__(self, data):
         self.name= data["name"]
         self.cards = data["cards"]
-        self.chips= data["chips"]
+        self.chips = data["chips"]
 
 
 class TurnState:

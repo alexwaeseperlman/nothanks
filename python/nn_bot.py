@@ -39,6 +39,7 @@ def compute_score(cards, chips):
             total += cards[i]
     return total - chips
 
+
 def _build_model_from_json(arch_def):
     """Recursively build nn.Module from JSON list structure"""
     module_type, module_args = arch_def
@@ -49,6 +50,17 @@ def _build_model_from_json(arch_def):
         return getattr(nn, module_type)(**module_args)
     else:
         raise ValueError(f"Unknown layer type: {module_type}")
+
+
+def _to_binary_vector(cards):
+    return [1.0 if c in cards else -1.0 for c in range(3, 36)]
+
+
+def _feature_from_player_state(player):
+    return [
+        (player.chips - 11.0) / 5.0,
+        *_to_binary_vector(player.cards)
+    ]
 
 
 class NeuralNetworkBot(Bot):
@@ -83,8 +95,6 @@ class NeuralNetworkBot(Bot):
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
-    # === Interface methods ===
-
     def init_match(self):
         return {
             "chosen_log_probs": [],
@@ -93,13 +103,17 @@ class NeuralNetworkBot(Bot):
 
     def extract_feature(self, turn_state):
         return torch.tensor([
-            turn_state.current,
-            turn_state.pot,
-            turn_state.you.chips,
-            len(turn_state.others),
+            *_to_binary_vector([turn_state.current]),
+            (turn_state.pot - 3.0) / 3.0,
+            *_feature_from_player_state(turn_state.you),
+            *[f for p in turn_state.others for f in _feature_from_player_state(p)],
         ], dtype=torch.float32, device=self.device)
 
     def sample_action_from_probs(self, probs):
+        if probs[0] < 0.1:
+            probs = [0.1, 0.9]
+        elif probs[0] > 0.9:
+            probs = [1.9, 0.1]
         return np.random.choice(len(probs), p=probs)
 
     def choose_action(self, turn_state, match_state) -> str:
