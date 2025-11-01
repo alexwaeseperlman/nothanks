@@ -1,0 +1,9 @@
+[
+  "Sequential", [
+    ["Linear", {"in_features": 4, "out_features": 16}],
+    ["ReLU", {}],
+    ["Linear", {"in_features": 16, "out_features": 16}],
+    ["ReLU", {}],
+    ["Linear", {"in_features": 16, "out_features": 2}]
+  ]
+]

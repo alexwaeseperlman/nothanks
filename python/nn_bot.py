@@ -9,6 +9,8 @@ import numpy as np
 import string
 import logging
 import time
+import os
+import json
 
 from bot import Bot
 
@@ -20,8 +22,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVER_URL = "http://localhost:3000"
 _DEFAULT_NAMESPACE = "/bots"
-_DEFAULT_BOT_COUNT = "3"
+_DEFAULT_BOT_COUNT = 1
 _DEFAULT_BOT_NAME = "NNBot"
+_DEFAULT_CHECKPOINT_EVERY = 50  # number of updates between saving checkpoints
+_DEFAULT_MODEL_DIR = "models"
 
 
 def compute_score(cards, chips):
@@ -35,31 +39,59 @@ def compute_score(cards, chips):
             total += cards[i]
     return total - chips
 
+def _build_model_from_json(arch_def):
+    """Recursively build nn.Module from JSON list structure"""
+    module_type, module_args = arch_def
+
+    if module_type == "Sequential":
+        return nn.Sequential(*[_build_model_from_json(a) for a in module_args])
+    elif hasattr(nn, module_type):
+        return getattr(nn, module_type)(**module_args)
+    else:
+        raise ValueError(f"Unknown layer type: {module_type}")
+
 
 class NeuralNetworkBot(Bot):
-    def __init__(self, name, server_url, namespace, lr=0.001):
+    def __init__(self, name, server_url, namespace, model_dir,
+                 init_model: str = None, arch_json: str = None,
+                 lr=0.001, checkpoint_every=100):
         super().__init__(name, server_url, namespace, sequential=True)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = nn.Sequential(
-            nn.Linear(4, 16),
-            nn.ReLU(),
-            nn.Linear(16, 8),
-            nn.ReLU(),
-            nn.Linear(8, 2),
-        ).to(self.device)
+        self.model_dir = model_dir
+        self.checkpoint_every = checkpoint_every
+        self.update_count = 0
+
+        if init_model is not None and arch_json is not None:
+            raise ValueError("init_model and arch_json are mutually exclusive")
+
+        if init_model is not None:
+            # Load pretrained model
+            model_path = os.path.join(model_dir, f"{init_model}.pt")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Pretrained model not found: {model_path}")
+            self.model = torch.load(model_path, map_location=self.device,
+                                    weights_only=False)
+            logger.info(f"[{name}] Loaded pretrained model from {model_path}")
+        elif arch_json is not None:
+            # Build model from JSON architecture
+            with open(arch_json, "r") as f:
+                arch_def = json.load(f)
+            self.model = _build_model_from_json(arch_def).to(self.device)
+            logger.info(f"[{name}] Built model from architecture {arch_json}")
+        else:
+            raise ValueError("Either init_model or arch_json must be provided")
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
     # === Interface methods ===
 
     def init_match(self):
-        """Initialize per-match memory."""
         return {
             "chosen_log_probs": [],
             "score_history": []
         }
 
     def extract_feature(self, turn_state):
-        """Convert turn state to model input tensor."""
         return torch.tensor([
             turn_state.current,
             turn_state.pot,
@@ -68,14 +100,7 @@ class NeuralNetworkBot(Bot):
         ], dtype=torch.float32, device=self.device)
 
     def sample_action_from_probs(self, probs):
-        """
-        Sample action index from probability distribution.
-        Returns:
-            int: 0 = take, 1 = pass
-        """
         return np.random.choice(len(probs), p=probs)
-
-    # === Core game logic ===
 
     def choose_action(self, turn_state, match_state) -> str:
         x = self.extract_feature(turn_state)
@@ -87,28 +112,22 @@ class NeuralNetworkBot(Bot):
         action_idx = self.sample_action_from_probs(probs)
         action = "take" if action_idx == 0 else "pass"
 
-        # store chosen log-prob for REINFORCE update
         chosen_log_prob = log_probs[action_idx]
         match_state["chosen_log_probs"].append(chosen_log_prob)
 
-        # record per-player scores
         scores = {
             "score": compute_score(turn_state.you.cards, turn_state.you.chips),
-            "others": [
-                compute_score(p.cards, p.chips) for p in turn_state.others
-            ]
+            "others": [compute_score(p.cards, p.chips) for p in turn_state.others]
         }
         match_state["score_history"].append(scores)
 
         return action
 
     def compute_reward(self, score_history, result):
-        """Compute per-step rewards based on score progression."""
         others_scores = np.array([s["others"] for s in score_history])
         self_scores = np.array([s["score"] for s in score_history])
         rel = others_scores.mean(axis=1) - self_scores
         score_delta = np.diff(rel)
-
         result_reward = {"win": 1.0, "draw": 0.0, "loss": -1.0}[result]
         rewards = score_delta + result_reward * 20.0
         return rewards
@@ -125,13 +144,32 @@ class NeuralNetworkBot(Bot):
         loss.backward()
         self.optimizer.step()
 
+        # checkpoint model every N updates
+        self.update_count += 1
+        if self.update_count % self.checkpoint_every == 0:
+            checkpoint_path = os.path.join(self.model_dir, f"{self.name}.pt")
+            torch.save(self.model, checkpoint_path)
+            logger.info(f"[{self.name}] saved checkpoint at {checkpoint_path}")
+
         logger.info(f"[{self.name}] updated model, avg reward={rewards.mean().item():.3f}")
 
-def main(name, server_url, namespace, n_bots):
+
+def main(name, server_url, namespace, n_bots, model_dir,
+         arch_json=None, checkpoint_every=_DEFAULT_CHECKPOINT_EVERY,
+         init_model=None):
+
     torch.autograd.set_detect_anomaly(True)
 
-    suffixes = [''.join(random.choices(string.ascii_lowercase,k=3)) for _ in range(n_bots)]
-    bots = [ NeuralNetworkBot(f"{name}-{s}", server_url, namespace) for s in suffixes ]
+    suffixes = [''.join(random.choices(string.ascii_lowercase, k=3)) for _ in range(n_bots)]
+    bots = [NeuralNetworkBot(
+                f"{name}-{s}",
+                server_url,
+                namespace,
+                model_dir,
+                init_model=init_model,
+                arch_json=arch_json,
+                checkpoint_every=checkpoint_every
+            ) for s in suffixes]
 
     try:
         logger.info("All bots: Connecting ...")
@@ -141,7 +179,7 @@ def main(name, server_url, namespace, n_bots):
 
         try:
             while True:
-                time.sleep(10)  # Wait 1 second in each loop iteration
+                time.sleep(10)
         except KeyboardInterrupt:
             pass
     finally:
@@ -150,13 +188,29 @@ def main(name, server_url, namespace, n_bots):
             bot.disconnect()
         logger.info("All bots: Disconnected ...")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Example bots")
+    parser = argparse.ArgumentParser("NeuralNetworkBots")
     parser.add_argument("--server-url", type=str, default=_DEFAULT_SERVER_URL)
     parser.add_argument("--namespace", type=str, default=_DEFAULT_NAMESPACE)
     parser.add_argument("--n-bots", type=int, default=_DEFAULT_BOT_COUNT)
     parser.add_argument("--name", type=str, default=_DEFAULT_BOT_NAME)
+    parser.add_argument("--model-dir", type=str, default=_DEFAULT_MODEL_DIR)
+    parser.add_argument("--checkpoint-every-updates", type=int, default=_DEFAULT_CHECKPOINT_EVERY)
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--model-arch", type=str, help="JSON file specifying model architecture")
+    group.add_argument("--init-model", type=str, help="Name of pretrained model to load from model_dir")
 
     args = parser.parse_args()
 
-    main(args.name, args.server_url, args.namespace, args.n_bots)
+    main(
+        args.name,
+        args.server_url,
+        args.namespace,
+        args.n_bots,
+        args.model_dir,
+        arch_json=args.model_arch,
+        checkpoint_every=args.checkpoint_every_updates,
+        init_model=args.init_model,
+    )
