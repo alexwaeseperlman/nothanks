@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import logging
 import os
@@ -23,17 +24,9 @@ class DQNBot(NeuralNetworkBot):
         namespace,
         eval_mode: bool,
         model_dir,
-        reward_config,
+        train_config,
         init_model=None,
         arch_json=None,
-        lr=1e-3,
-        checkpoint_every=100,
-        gamma=0.99,
-        epsilon_start=1.0,
-        epsilon_end=0.05,
-        epsilon_decay=0.9999,
-        buffer_size=5000,
-        batch_size=64,
     ):
         super().__init__(
             name,
@@ -41,26 +34,33 @@ class DQNBot(NeuralNetworkBot):
             namespace,
             eval_mode,
             model_dir,
-            reward_config,  # not used
+            train_config,
             init_model,
             arch_json,
-            lr,
-            checkpoint_every,
         )
-        self.gamma = gamma
-        self.epsilon = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
-        self.batch_size = batch_size
+
+        if eval_mode:
+            self.lock = contextlib.nullcontext()
+        else:
+            # thread lock to avoid concurent model update
+            self.lock = threading.Lock()
+
+    def load_train_config(self, train_config):
+        super().load_train_config(train_config)
+
+        self.batch_size = train_config.get("batch_size", 64)
+        buffer_size = train_config.get("buffer_size", 5000)
         self.replay = deque(maxlen=buffer_size)
+
+        self.gamma = train_config.get("gamma", 0.99)
+        self.epsilon_start = train_config.get("epsilon_start", 1.0)
+        self.epsilon_end = train_config.get("epsilon_end", 0.05)
+        self.epsilon_decay = train_config.get("epsilon_decay", 0.9999)
 
         # Target network
         self.target_model = copy.deepcopy(self.model)
         self.target_model.to(self.device)
         self.target_model.eval()
-
-        # thread lock to avoid concurent model update
-        self.lock = threading.Lock()
 
     def init_match(self):
         return {}
