@@ -64,15 +64,20 @@ def _feature_from_player_state(player):
         *_to_binary_vector(player.cards)
     ]
 
+
 def _delta_mavg(scores, weight):
     if weight:
         delta_sum = 0
         weight_sum = 0
         for i, w in enumerate(weight):
-            n = i + 1
-            scores_n = np.concatenate((scores[n:], np.ones(n-1) * scores[-1])) # repeat match end score
-            delta_sum += (scores_n - scores[:-1]) * w # no need for the match end score
-            weight_sum += w
+            if w > 0:
+                n = i + 1
+                if n >= scores.shape[0]:
+                    scores_n = np.ones(scores.shape[0]-1) * scores[-1] # repeat match end score
+                else:
+                    scores_n = np.concatenate((scores[n:], np.ones(n-1) * scores[-1])) # repeat match end score
+                delta_sum += (scores_n - scores[:-1]) * w # no need for the match end score
+                weight_sum += w
         return delta_sum / weight_sum
     else:
         return 0.0
