@@ -1,29 +1,28 @@
 #!/usr/bin/env python
 
 import argparse
+import json
+import logging
+import os
 import random
 import string
-import logging
 import time
-import os
-import json
 
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
 
 from bot import Bot
 from utils import (
-    to_binary_vector, 
-    feature_from_player_state, 
-    build_model_from_json, 
+    build_model_from_json,
     compute_score,
+    feature_from_player_state,
     result_and_score_reward,
+    to_binary_vector,
 )
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -37,9 +36,18 @@ _DEFAULT_REWARD_CONFIG = "reward_config.json"
 
 
 class NeuralNetworkBot(Bot):
-    def __init__(self, name, server_url, namespace, model_dir, reward_config,
-                 init_model: str = None, arch_json: str = None, lr=0.001,
-                 checkpoint_every=100):
+    def __init__(
+        self,
+        name,
+        server_url,
+        namespace,
+        model_dir,
+        reward_config,
+        init_model: str = None,
+        arch_json: str = None,
+        lr=0.001,
+        checkpoint_every=100,
+    ):
         super().__init__(name, server_url, namespace, sequential=True)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_dir = model_dir
@@ -56,8 +64,9 @@ class NeuralNetworkBot(Bot):
             model_path = os.path.join(model_dir, f"{init_model}.pt")
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Pretrained model not found: {model_path}")
-            self.model = torch.load(model_path, map_location=self.device,
-                                    weights_only=False)
+            self.model = torch.load(
+                model_path, map_location=self.device, weights_only=False
+            )
             logger.info(f"[{name}] Loaded pretrained model from {model_path}")
         elif arch_json is not None:
             # Build model from JSON architecture
@@ -71,18 +80,19 @@ class NeuralNetworkBot(Bot):
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
     def init_match(self):
-        return {
-            "chosen_logits": [],
-            "score_history": []
-        }
+        return {"chosen_logits": [], "score_history": []}
 
     def extract_feature(self, turn_state):
-        return torch.tensor([
-            *to_binary_vector([turn_state.current]),
-            (turn_state.pot - 3.0) / 3.0,
-            *feature_from_player_state(turn_state.you),
-            *[f for p in turn_state.others for f in feature_from_player_state(p)],
-        ], dtype=torch.float32, device=self.device)
+        return torch.tensor(
+            [
+                *to_binary_vector([turn_state.current]),
+                (turn_state.pot - 3.0) / 3.0,
+                *feature_from_player_state(turn_state.you),
+                *[f for p in turn_state.others for f in feature_from_player_state(p)],
+            ],
+            dtype=torch.float32,
+            device=self.device,
+        )
 
     def sample_action_from_probs(self, probs):
         if probs[0] < 0.1:
@@ -105,7 +115,7 @@ class NeuralNetworkBot(Bot):
 
         scores = {
             "score": compute_score(turn_state.you.cards, turn_state.you.chips),
-            "others": [compute_score(p.cards, p.chips) for p in turn_state.others]
+            "others": [compute_score(p.cards, p.chips) for p in turn_state.others],
         }
         match_state["score_history"].append(scores)
 
@@ -113,7 +123,9 @@ class NeuralNetworkBot(Bot):
 
     def compute_reward(self, score_history, result):
         if self.reward_config["type"] == "result_and_score":
-            return result_and_score_reward(self.reward_config["config"], score_history, result)
+            return result_and_score_reward(
+                self.reward_config["config"], score_history, result
+            )
         else:
             raise ValueError(f"Unknown {self.reward_config['type']=}")
 
@@ -140,25 +152,40 @@ class NeuralNetworkBot(Bot):
             torch.save(self.model, checkpoint_path)
             logger.info(f"[{self.name}] saved checkpoint at {checkpoint_path}")
 
-        logger.info(f"[{self.name}] updated model, avg reward={rewards.mean().item():.3f}")
+        logger.info(
+            f"[{self.name}] updated model, avg reward={rewards.mean().item():.3f}"
+        )
 
 
-def main(name, server_url, namespace, n_bots, model_dir, arch_json,
-         checkpoint_every, init_model, reward_config):
-
+def main(
+    name,
+    server_url,
+    namespace,
+    n_bots,
+    model_dir,
+    arch_json,
+    checkpoint_every,
+    init_model,
+    reward_config,
+):
     torch.autograd.set_detect_anomaly(True)
 
-    suffixes = [''.join(random.choices(string.ascii_lowercase, k=3)) for _ in range(n_bots)]
-    bots = [NeuralNetworkBot(
-                f"{name}-{s}",
-                server_url,
-                namespace,
-                model_dir,
-                reward_config=reward_config,
-                init_model=init_model,
-                arch_json=arch_json,
-                checkpoint_every=checkpoint_every
-            ) for s in suffixes]
+    suffixes = [
+        "".join(random.choices(string.ascii_lowercase, k=3)) for _ in range(n_bots)
+    ]
+    bots = [
+        NeuralNetworkBot(
+            f"{name}-{s}",
+            server_url,
+            namespace,
+            model_dir,
+            reward_config=reward_config,
+            init_model=init_model,
+            arch_json=arch_json,
+            checkpoint_every=checkpoint_every,
+        )
+        for s in suffixes
+    ]
 
     try:
         logger.info("All bots: Connecting ...")
@@ -185,14 +212,24 @@ if __name__ == "__main__":
     parser.add_argument("--n-bots", type=int, default=_DEFAULT_BOT_COUNT)
     parser.add_argument("--name", type=str, default=_DEFAULT_BOT_NAME)
     parser.add_argument("--model-dir", type=str, default=_DEFAULT_MODEL_DIR)
-    parser.add_argument("--checkpoint-every-updates", type=int, default=_DEFAULT_CHECKPOINT_EVERY)
+    parser.add_argument(
+        "--checkpoint-every-updates", type=int, default=_DEFAULT_CHECKPOINT_EVERY
+    )
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--model-arch", type=str, help="JSON file specifying model architecture")
-    group.add_argument("--init-model", type=str, help="Name of pretrained model to load from model_dir")
+    group.add_argument(
+        "--model-arch", type=str, help="JSON file specifying model architecture"
+    )
+    group.add_argument(
+        "--init-model", type=str, help="Name of pretrained model to load from model_dir"
+    )
 
-    parser.add_argument("--reward-config", type=str, default=_DEFAULT_REWARD_CONFIG,
-                        help="JSON file specifying reward function")
+    parser.add_argument(
+        "--reward-config",
+        type=str,
+        default=_DEFAULT_REWARD_CONFIG,
+        help="JSON file specifying reward function",
+    )
 
     args = parser.parse_args()
 
