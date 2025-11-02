@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from nn import NeuralNetworkBot
-from utils import ACTIONS, result_reward
+from utils import ACTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class DQNBot(NeuralNetworkBot):
         self.target_model.eval()
 
     def load_reward_config(self, reward_config):
-        pass
+        self.reward_map = reward_config
 
     def init_match(self):
         return {}
@@ -143,6 +143,6 @@ class DQNBot(NeuralNetworkBot):
             self.observe(
                 match_state,
                 next_state=match_state["last_state"],  # this is just a place holder
-                reward=result_reward(result),
+                reward=self.reward_map[result],
                 final=1.0,
             )
