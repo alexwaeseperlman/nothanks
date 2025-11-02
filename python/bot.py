@@ -1,7 +1,8 @@
 from collections import deque
-import socketio
 import threading
 import logging
+
+import socketio
 
 logger = logging.getLogger(__name__)
 

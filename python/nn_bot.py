@@ -2,15 +2,16 @@
 
 import argparse
 import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
 import string
 import logging
 import time
 import os
 import json
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
 
 from bot import Bot
 
@@ -170,7 +171,7 @@ class NeuralNetworkBot(Bot):
         if self.reward_config["type"] == "simple":
             return _simple_reward(self.reward_config["config"], score_history, result)
         else:
-            raise ValueError(f"Unknown {self.reward_config["type"]=}")
+            raise ValueError(f"Unknown {self.reward_config['type']=}")
 
     def match_end_feedback(self, match_state, result, score, others):
         match_state["score_history"].append({"score": score, "others": others})
