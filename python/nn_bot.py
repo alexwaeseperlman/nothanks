@@ -6,8 +6,6 @@ import random
 import string
 import time
 
-import torch
-
 from nn import NeuralNetworkBot
 
 logging.basicConfig(
@@ -21,23 +19,19 @@ _DEFAULT_BOT_COUNT = 1
 _DEFAULT_BOT_NAME = "NNBot"
 _DEFAULT_CHECKPOINT_EVERY = 50  # number of updates between saving checkpoints
 _DEFAULT_MODEL_DIR = "models"
-_DEFAULT_REWARD_CONFIG = "reward_config.json"
 
 
 def main(
     name,
-    eval_mode,
     server_url,
     namespace,
     n_bots,
     model_dir,
     arch_json,
-    checkpoint_every,
     init_model,
-    reward_config,
+    eval_mode,
+    train_config,
 ):
-    torch.autograd.set_detect_anomaly(True)
-
     suffixes = [
         "".join(random.choices(string.ascii_lowercase, k=3)) for _ in range(n_bots)
     ]
@@ -46,12 +40,11 @@ def main(
             f"{name}-{s}",
             server_url,
             namespace,
-            eval_mode=eval_mode,
             model_dir=model_dir,
-            reward_config=reward_config,
+            eval_mode=eval_mode,
+            train_config=train_config,
             init_model=init_model,
             arch_json=arch_json,
-            checkpoint_every=checkpoint_every,
         )
         for s in suffixes
     ]
@@ -76,15 +69,11 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("NeuralNetworkBots")
-    parser.add_argument("--eval-mode", action='store_true')
     parser.add_argument("--server-url", type=str, default=_DEFAULT_SERVER_URL)
     parser.add_argument("--namespace", type=str, default=_DEFAULT_NAMESPACE)
     parser.add_argument("--n-bots", type=int, default=_DEFAULT_BOT_COUNT)
     parser.add_argument("--name", type=str, default=_DEFAULT_BOT_NAME)
     parser.add_argument("--model-dir", type=str, default=_DEFAULT_MODEL_DIR)
-    parser.add_argument(
-        "--checkpoint-every-updates", type=int, default=_DEFAULT_CHECKPOINT_EVERY
-    )
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -94,24 +83,24 @@ if __name__ == "__main__":
         "--init-model", type=str, help="Name of pretrained model to load from model_dir"
     )
 
-    parser.add_argument(
-        "--reward-config",
+    group = parser.add_mutually_exclusive_group(required=False)
+    group.add_argument("--eval-mode", action="store_true")
+    group.add_argument(
+        "--train-config",
         type=str,
-        default=_DEFAULT_REWARD_CONFIG,
-        help="JSON file specifying reward function",
+        help="JSON file specifying training config. Not used for eval.",
     )
 
     args = parser.parse_args()
 
     main(
         args.name,
-        args.eval_mode,
         args.server_url,
         args.namespace,
         args.n_bots,
         args.model_dir,
         arch_json=args.model_arch,
-        checkpoint_every=args.checkpoint_every_updates,
         init_model=args.init_model,
-        reward_config=args.reward_config,
+        eval_mode=args.eval_mode,
+        train_config=args.train_config,
     )

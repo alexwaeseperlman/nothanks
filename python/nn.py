@@ -14,6 +14,7 @@ from utils import (
     feature_from_player_state,
     result_and_score_reward,
     to_binary_vector,
+result_reward
 )
 
 logger = logging.getLogger(__name__)
@@ -37,22 +38,16 @@ class NeuralNetworkBot(Bot):
         name,
         server_url,
         namespace,
-        eval_mode : bool,
         model_dir,
-        reward_config,
+        eval_mode: bool,
+        train_config: str,
         init_model: str = None,
         arch_json: str = None,
-        lr=0.001,
-        checkpoint_every=100,
     ):
         super().__init__(name, server_url, namespace, sequential=True)
         self.eval_mode = eval_mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_dir = model_dir
-        self.checkpoint_every = checkpoint_every
-        self.update_count = 0
-        with open(reward_config, "r") as f:
-            self.reward_config = json.load(f)
 
         if init_model is not None and arch_json is not None:
             raise ValueError("init_model and arch_json are mutually exclusive")
@@ -75,7 +70,29 @@ class NeuralNetworkBot(Bot):
         else:
             raise ValueError("Either init_model or arch_json must be provided")
 
+        if not eval_mode:
+            with open(train_config, "r") as f:
+                train_config_json = json.load(f)
+            self.load_train_config(train_config_json)
+
+    def load_train_config(self, train_config):
+        self.checkpoint_every = train_config.get("checkpoint_every", 100)
+        lr = train_config.get("lr", 0.001)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        self.update_count = 0
+
+        self.reward_config = self.load_reward_config(train_config.get("reward_config"))
+
+    def load_reward_config(self, reward_config):
+        reward_type = reward_config["type"]
+        if reward_type == "result_and_score":
+            self.compute_reward = lambda score_history, result: result_and_score_reward(
+                reward_config["config"], score_history, result
+            )
+        elif reward_type == "result":
+            self.compute_reward = lambda _, result: result_reward(result)
+        else:
+            raise ValueError(f"Unknown {reward_type=}")
 
     def init_match(self):
         return {"chosen_logits": [], "score_history": []}
@@ -98,14 +115,14 @@ class NeuralNetworkBot(Bot):
         elif probs[0] > 0.9:
             probs = [0.9, 0.1]
         return np.random.choice(len(probs), p=probs)
-    
+
     def choose_action_train(self, x, turn_state, match_state):
         self.model.train()
         logits = self.model(x)
         log_probs = torch.log_softmax(logits, dim=0)
         probs = torch.exp(log_probs).detach().cpu().numpy()
         action_idx = self.sample_action_from_probs(probs)
-        
+
         match_state["chosen_logits"].append(logits[action_idx])
         scores = {
             "score": compute_score(turn_state.you.cards, turn_state.you.chips),
@@ -124,21 +141,13 @@ class NeuralNetworkBot(Bot):
 
     def choose_action(self, turn_state, match_state) -> str:
         x = self.extract_feature(turn_state)
-        
+
         if self.eval_mode:
             action_idx = self.choose_action_eval(x, turn_state, match_state)
         else:
             action_idx = self.choose_action_train(x, turn_state, match_state)
 
         return ACTIONS[action_idx]
-
-    def compute_reward(self, score_history, result):
-        if self.reward_config["type"] == "result_and_score":
-            return result_and_score_reward(
-                self.reward_config["config"], score_history, result
-            )
-        else:
-            raise ValueError(f"Unknown {self.reward_config['type']=}")
 
     def match_end_feedback(self, match_state, result, score, others):
         if self.eval_mode:
