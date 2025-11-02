@@ -124,7 +124,7 @@ class NeuralNetworkBot(Bot):
 
     def init_match(self):
         return {
-            "chosen_log_probs": [],
+            "chosen_logits": [],
             "score_history": []
         }
 
@@ -153,8 +153,7 @@ class NeuralNetworkBot(Bot):
         action_idx = self.sample_action_from_probs(probs)
         action = "take" if action_idx == 0 else "pass"
 
-        chosen_log_prob = log_probs[action_idx]
-        match_state["chosen_log_probs"].append(chosen_log_prob)
+        match_state["chosen_logits"].append(logits[action_idx])
 
         scores = {
             "score": compute_score(turn_state.you.cards, turn_state.you.chips),
@@ -175,8 +174,8 @@ class NeuralNetworkBot(Bot):
         rewards = self.compute_reward(match_state["score_history"], result)
 
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-        chosen_log_probs = torch.stack(match_state["chosen_log_probs"])
-        loss = -(chosen_log_probs * rewards).mean()
+        chosen_logits = torch.stack(match_state["chosen_logits"])
+        loss = -(chosen_logits * rewards).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
